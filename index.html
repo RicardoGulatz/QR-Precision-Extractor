@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LEITOR DE QRCODE - ALTA PRECISÃO</title>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- pdf.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <!-- jsQR -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <!-- xlsx -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    .loader {
+      border: 3px solid rgba(255,255,255,.35);
+      border-top: 3px solid rgba(255,255,255,.95);
+      border-radius: 999px;
+      width: 18px;
+      height: 18px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .toast-in { animation: toastIn .18s ease-out both; }
+    .toast-out { animation: toastOut .18s ease-in both; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
+
+    /* Optional: slightly better font rendering in Electron */
+    html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          boxShadow: { 'soft': '0 10px 30px rgba(2,6,23,.08)' }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <!-- Background -->
+  <div class="fixed inset-0 -z-10">
+    <div class="absolute inset-0 bg-gradient-to-br from-indigo-950 via-slate-950 to-slate-950"></div>
+    <div class="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-indigo-500/20 blur-3xl"></div>
+    <div class="absolute top-28 -right-28 h-80 w-80 rounded-full bg-cyan-400/15 blur-3xl"></div>
+    <div class="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-fuchsia-500/10 blur-3xl"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(148,163,184,.12)_1px,transparent_0)] [background-size:22px_22px] opacity-25"></div>
+  </div>
+
+  <!-- Toast Host -->
+  <div id="toastHost" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none"></div>
+
+  <!-- Custom Topbar (Electron) -->
+  <div class="flex items-center justify-between px-3 py-2 bg-slate-950/60 border-b border-white/10 select-none"
+       style="-webkit-app-region: drag;">
+    <div class="flex items-center gap-2">
+      <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+      <span class="text-xs font-semibold text-slate-200">Leitor de QR Code — Alta Precisão</span>
+    </div>
+
+    <div class="flex items-center gap-1" style="-webkit-app-region: no-drag;">
+      <button id="minBtn" class="h-8 w-10 rounded-lg hover:bg-white/10 text-slate-200" title="Minimizar">—</button>
+      <button id="maxBtn" class="h-8 w-10 rounded-lg hover:bg-white/10 text-slate-200" title="Maximizar / Restaurar">□</button>
+      <button id="closeBtn" class="h-8 w-10 rounded-lg hover:bg-rose-500/80 hover:text-white text-slate-200" title="Fechar">✕</button>
+    </div>
+  </div>
+
+  <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+    <!-- Header -->
+    <header class="mb-6">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+            <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+            Leitura otimizada de QR em PDF
+          </p>
+          <h1 class="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight">
+            Leitor de QR Code <span class="text-indigo-300">Alta Precisão</span>
+          </h1>
+          <p class="mt-2 max-w-2xl text-sm text-slate-300">
+            Extrai links de <b>todas as páginas</b>, com tentativa em múltiplas escalas e binarização agressiva para PDFs de baixa qualidade.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="btnExcelTop"
+            class="hidden sm:inline-flex items-center gap-2 rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-slate-950 shadow-soft hover:bg-emerald-400 active:scale-[.99] transition"
+            disabled>
+            <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"/>
+            </svg>
+            Exportar Excel
+          </button>
+
+          <button id="btnClear"
+            class="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-white/10 active:scale-[.99] transition">
+            <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M7 4a1 1 0 00-1 1v1H4a1 1 0 000 2h1v8a2 2 0 002 2h6a2 2 0 002-2V8h1a1 1 0 100-2h-2V5a1 1 0 00-1-1H7zm2 4a1 1 0 012 0v7a1 1 0 11-2 0V8zm-3 0a1 1 0 112 0v7a1 1 0 11-2 0V8zm7 0a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd"/>
+            </svg>
+            Limpar
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Content grid -->
+    <section class="grid gap-6 lg:grid-cols-5">
+      <!-- Left panel -->
+      <div class="lg:col-span-2">
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-soft">
+          <h2 class="text-base font-bold text-slate-100">Arquivos</h2>
+          <p class="mt-1 text-sm text-slate-300">Selecione um ou mais PDFs para extrair os links do QR Code.</p>
+
+          <!-- Dropzone -->
+          <label id="dropzone"
+            class="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/5 px-4 py-8 text-center hover:bg-white/10 transition">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-200">
+              <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M16.88 9.94A6.5 6.5 0 005 6.5a4.5 4.5 0 00.5 9h10a3.5 3.5 0 001.38-5.56z"/>
+              </svg>
+            </div>
+            <p class="mt-3 text-sm font-semibold text-slate-100">Clique para selecionar</p>
+            <p class="mt-1 text-xs text-slate-300">ou arraste e solte aqui (PDF)</p>
+            <p class="mt-3 text-[11px] text-slate-400">Dica: PDFs “granulados” podem exigir mais tempo por página.</p>
+
+            <input type="file" id="pdfFile" accept=".pdf" multiple class="hidden" />
+          </label>
+
+          <!-- File list -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-200">Selecionados</span>
+              <span id="fileCount" class="text-xs text-slate-400">0</span>
+            </div>
+            <div id="fileList" class="mt-2 max-h-48 overflow-auto rounded-xl border border-white/10 bg-slate-950/30 p-2">
+              <p class="px-2 py-3 text-xs text-slate-400">Nenhum arquivo selecionado.</p>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="mt-5 grid gap-3">
+            <button id="scanButton"
+              class="group relative inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-500 px-4 py-3 text-sm font-bold text-white shadow-soft hover:bg-indigo-400 active:scale-[.99] disabled:bg-white/10 disabled:text-slate-400 disabled:shadow-none transition"
+              disabled>
+              <svg class="h-5 w-5 opacity-90" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M4 3a2 2 0 00-2 2v3a1 1 0 102 0V5h3a1 1 0 100-2H4zm12 0h-3a1 1 0 100 2h3v3a1 1 0 102 0V5a2 2 0 00-2-2zM3 13a1 1 0 011 1v3h3a1 1 0 110 2H4a2 2 0 01-2-2v-3a1 1 0 011-1zm14 0a1 1 0 011 1v3a2 2 0 01-2 2h-3a1 1 0 110-2h3v-3a1 1 0 011-1z"/>
+              </svg>
+              Iniciar extração
+              <span class="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-white/10"></span>
+            </button>
+
+            <div class="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-200">Status</span>
+                <span id="statusBadge" class="text-[11px] rounded-full bg-white/10 px-2 py-0.5 text-slate-300">Aguardando</span>
+              </div>
+
+              <div class="mt-3 flex items-center gap-3">
+                <div id="statusSpinner" class="hidden"><div class="loader"></div></div>
+                <p id="statusText" class="text-xs text-slate-300">Selecione PDFs para iniciar.</p>
+              </div>
+
+              <div class="mt-3">
+                <div class="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div id="progressBar" class="h-full w-0 rounded-full bg-indigo-400 transition-all"></div>
+                </div>
+                <p id="progressHint" class="mt-2 text-[11px] text-slate-400">—</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="mt-4 text-xs text-slate-400">
+          Observação: a leitura padrão busca <b>1 QR por página</b>. Se uma página tiver múltiplos QRs, dá para evoluir com varredura por regiões.
+        </p>
+      </div>
+
+      <!-- Right panel -->
+      <div class="lg:col-span-3">
+        <div class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-soft">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-base font-bold text-slate-100">Resultados</h2>
+              <p class="mt-1 text-sm text-slate-300">
+                Links encontrados por arquivo. Clique em um link para abrir ou use “Copiar”.
+              </p>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button id="btnCopyAll"
+                class="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10 active:scale-[.99] transition disabled:opacity-50"
+                disabled
+                title="Copia todos os links encontrados (de todos os PDFs)">
+                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M8 2a2 2 0 00-2 2v9a2 2 0 002 2h7a2 2 0 002-2V7.414A2 2 0 0016.414 6L12 1.586A2 2 0 0010.586 1H8zm4 1.414L16.586 8H12V3.414z"/>
+                  <path d="M4 6a2 2 0 012-2h1a1 1 0 010 2H6v10h8v-1a1 1 0 112 0v1a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/>
+                </svg>
+                Copiar tudo
+              </button>
+
+              <button id="btnExcel"
+                class="inline-flex items-center gap-2 rounded-xl bg-emerald-500/90 px-3 py-2 text-xs font-semibold text-slate-950 shadow-soft hover:bg-emerald-400 active:scale-[.99] transition disabled:opacity-50"
+                disabled>
+                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"/>
+                </svg>
+                Excel
+              </button>
+            </div>
+          </div>
+
+          <!-- Summary -->
+          <div class="mt-4 grid gap-3 sm:grid-cols-3">
+            <div class="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+              <p class="text-[11px] text-slate-400">Arquivos processados</p>
+              <p id="sumFiles" class="mt-1 text-2xl font-extrabold" data-value="0">0</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+              <p class="text-[11px] text-slate-400">Links encontrados</p>
+              <p id="sumLinks" class="mt-1 text-2xl font-extrabold">0</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+              <p class="text-[11px] text-slate-400">Arquivos sem QR</p>
+              <p id="sumEmpty" class="mt-1 text-2xl font-extrabold" data-value="0">0</p>
+            </div>
+          </div>
+
+          <!-- Table -->
+          <div class="mt-5 overflow-hidden rounded-2xl border border-white/10">
+            <table class="min-w-full divide-y divide-white/10">
+              <thead class="bg-white/5">
+                <tr>
+                  <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-300">Arquivo</th>
+                  <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-300">Links / Resultado</th>
+                </tr>
+              </thead>
+              <tbody id="resultTableBody" class="divide-y divide-white/10 bg-slate-950/20"></tbody>
+            </table>
+          </div>
+
+          <p class="mt-4 text-xs text-slate-400">
+            Dica: use <b>Copiar tudo</b> para copiar todos os links encontrados para a área de transferência (um por linha).
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <canvas id="procCanvas" class="hidden"></canvas>
+  </main>
+
+  <script>
+    // pdf.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    const pdfInput = document.getElementById('pdfFile');
+    const scanBtn = document.getElementById('scanButton');
+    const tableBody = document.getElementById('resultTableBody');
+    const canvas = document.getElementById('procCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    const statusText = document.getElementById('statusText');
+    const statusSpinner = document.getElementById('statusSpinner');
+    const statusBadge = document.getElementById('statusBadge');
+    const progressBar = document.getElementById('progressBar');
+    const progressHint = document.getElementById('progressHint');
+
+    const fileList = document.getElementById('fileList');
+    const fileCount = document.getElementById('fileCount');
+
+    const btnExcel = document.getElementById('btnExcel');
+    const btnExcelTop = document.getElementById('btnExcelTop');
+    const btnCopyAll = document.getElementById('btnCopyAll');
+    const btnClear = document.getElementById('btnClear');
+
+    const sumFiles = document.getElementById('sumFiles');
+    const sumLinks = document.getElementById('sumLinks');
+    const sumEmpty = document.getElementById('sumEmpty');
+
+    // Excel: 1 linha por link
+    let finalData = [];
+    // Copy all: lista total de links
+    let allLinks = [];
+
+    function setStatus(kind, text) {
+      statusText.textContent = text;
+
+      const map = {
+        idle:   { label: "Aguardando", cls: "bg-white/10 text-slate-300" },
+        running:{ label: "Processando", cls: "bg-indigo-400/20 text-indigo-200" },
+        done:   { label: "Concluído", cls: "bg-emerald-400/20 text-emerald-200" },
+        error:  { label: "Erro", cls: "bg-rose-400/20 text-rose-200" },
+      };
+      const s = map[kind] || map.idle;
+      statusBadge.textContent = s.label;
+      statusBadge.className = "text-[11px] rounded-full px-2 py-0.5 " + s.cls;
+      statusSpinner.classList.toggle('hidden', kind !== 'running');
+    }
+
+    function toast(message, tone = "ok") {
+      const host = document.getElementById('toastHost');
+      const el = document.createElement('div');
+
+      const toneCls = tone === "ok"
+        ? "bg-emerald-500/90 text-slate-950"
+        : tone === "warn"
+          ? "bg-amber-400/90 text-slate-950"
+          : "bg-rose-500/90 text-white";
+
+      el.className = `toast-in pointer-events-none mb-2 inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold shadow-soft ${toneCls}`;
+      el.innerHTML = `<span>${message}</span>`;
+      host.appendChild(el);
+
+      setTimeout(() => {
+        el.classList.remove('toast-in');
+        el.classList.add('toast-out');
+        setTimeout(() => el.remove(), 220);
+      }, 1100);
+    }
+
+    function updateSummary() {
+      const processed = Number(sumFiles.dataset.value || 0);
+      const links = allLinks.length;
+      const empty = Number(sumEmpty.dataset.value || 0);
+
+      sumFiles.textContent = processed;
+      sumLinks.textContent = links;
+      sumEmpty.textContent = empty;
+
+      const enableExport = processed > 0 && finalData.length > 0;
+      btnExcel.disabled = !enableExport;
+      btnExcelTop.disabled = !enableExport;
+      btnCopyAll.disabled = !(allLinks.length > 0);
+    }
+
+    function renderFileList(files) {
+      fileCount.textContent = String(files.length);
+      fileList.innerHTML = "";
+      if (!files.length) {
+        fileList.innerHTML = `<p class="px-2 py-3 text-xs text-slate-400">Nenhum arquivo selecionado.</p>`;
+        return;
+      }
+      for (const f of files) {
+        const item = document.createElement('div');
+        item.className = "flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2";
+        item.innerHTML = `
+          <div class="min-w-0">
+            <p class="truncate text-xs font-semibold text-slate-100">${escapeHtml(f.name)}</p>
+            <p class="text-[11px] text-slate-400">${formatBytes(f.size)}</p>
+          </div>
+          <span class="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-slate-300">PDF</span>
+        `;
+        fileList.appendChild(item);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function formatBytes(bytes) {
+      const units = ["B", "KB", "MB", "GB"];
+      let b = bytes, i = 0;
+      while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+      return `${b.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+    }
+
+    async function copyToClipboard(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Copiado!", "ok");
+      } catch (e) {
+        toast("Não foi possível copiar automaticamente.", "warn");
+        alert("Não foi possível copiar automaticamente. Copie manualmente.");
+      }
+    }
+
+    function setProgress(pct, hint = "—") {
+      const clamped = Math.max(0, Math.min(100, pct));
+      progressBar.style.width = clamped + "%";
+      progressHint.textContent = hint;
+    }
+
+    function resetAll() {
+      finalData = [];
+      allLinks = [];
+      tableBody.innerHTML = "";
+      sumFiles.dataset.value = "0";
+      sumEmpty.dataset.value = "0";
+      setProgress(0, "—");
+      setStatus("idle", "Selecione PDFs para iniciar.");
+      updateSummary();
+    }
+
+    // ---- Drag & Drop ----
+    const dropzone = document.getElementById('dropzone');
+    ["dragenter","dragover"].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        dropzone.classList.add("bg-white/10");
+      });
+    });
+    ["dragleave","drop"].forEach(evt => {
+      dropzone.addEventListener(evt, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        dropzone.classList.remove("bg-white/10");
+      });
+    });
+    dropzone.addEventListener("drop", (e) => {
+      const dt = e.dataTransfer;
+      if (!dt?.files?.length) return;
+      const pdfs = Array.from(dt.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
+      if (!pdfs.length) {
+        toast("Solte apenas arquivos PDF.", "warn");
+        return;
+      }
+      // Electron/Chromium usually supports setting files like this
+      pdfInput.files = dt.files;
+      onFilesChanged();
+    });
+
+    function onFilesChanged() {
+      const files = Array.from(pdfInput.files || []);
+      renderFileList(files);
+      scanBtn.disabled = files.length === 0;
+      setStatus("idle", files.length ? "Pronto para iniciar a extração." : "Selecione PDFs para iniciar.");
+    }
+
+    pdfInput.addEventListener("change", onFilesChanged);
+
+    btnClear.addEventListener("click", () => {
+      pdfInput.value = "";
+      onFilesChanged();
+      resetAll();
+      toast("Limpo.", "ok");
+    });
+
+    // ---- Core Scan ----
+    scanBtn.addEventListener('click', async () => {
+      const files = Array.from(pdfInput.files || []);
+      if (!files.length) return;
+
+      resetAll();
+
+      scanBtn.disabled = true;
+      setStatus("running", "Iniciando...");
+      setProgress(1, "Preparando...");
+
+      let processedFiles = 0;
+      let emptyFiles = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        setProgress((i / files.length) * 100, `Abrindo: ${file.name} (${i+1}/${files.length})`);
+        setStatus("running", `Abrindo: ${file.name}`);
+
+        const result = await processFile(file, (msg, pctLocal) => {
+          const globalPct = ((i + pctLocal) / files.length) * 100;
+          setProgress(globalPct, msg);
+          setStatus("running", msg);
+        });
+
+        processedFiles++;
+        sumFiles.dataset.value = String(processedFiles);
+
+        if (result.error) {
+          renderRow(file.name, result.error);
+          finalData.push({ "Arquivo": file.name, "Link": result.error });
+          emptyFiles++;
+          sumEmpty.dataset.value = String(emptyFiles);
+          updateSummary();
+          continue;
+        }
+
+        const links = result.links || [];
+        if (links.length === 0) {
+          renderRow(file.name, "Não encontrado");
+          finalData.push({ "Arquivo": file.name, "Link": "Não encontrado" });
+          emptyFiles++;
+          sumEmpty.dataset.value = String(emptyFiles);
+          updateSummary();
+          continue;
+        }
+
+        renderRow(file.name, links);
+
+        for (const link of links) {
+          finalData.push({ "Arquivo": file.name, "Link": link });
+          allLinks.push(link);
+        }
+
+        updateSummary();
+      }
+
+      setProgress(100, "Concluído.");
+      setStatus("done", "Concluído.");
+      scanBtn.disabled = false;
+
+      if (allLinks.length) toast(`Encontrados ${allLinks.length} link(s).`, "ok");
+      else toast("Nenhum QR encontrado.", "warn");
+    });
+
+    async function processFile(file, onProgress) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+        const found = new Set();
+
+        // Varre TODAS as páginas e tenta capturar 1 QR por página (se existir)
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const pctLocal = (pageNum - 1) / Math.max(1, pdf.numPages);
+          onProgress?.(`Escaneando: ${file.name} — página ${pageNum}/${pdf.numPages}`, pctLocal);
+
+          const page = await pdf.getPage(pageNum);
+
+          // Múltiplas escalas para aumentar chance de leitura
+          const scales = [2.0, 3.0, 4.0];
+          let pageFound = null;
+
+          for (let scale of scales) {
+            const viewport = page.getViewport({ scale: scale });
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            // 1) leitura direta
+            let code = jsQR(imgData.data, imgData.width, imgData.height);
+
+            // 2) binarização agressiva (se falhar)
+            if (!code) {
+              const binarizedData = binarizeImage(imgData);
+              code = jsQR(binarizedData, imgData.width, imgData.height);
+            }
+
+            if (code?.data) { pageFound = code.data; break; }
+          }
+
+          if (pageFound) found.add(pageFound);
+
+          onProgress?.(`Escaneando: ${file.name} — página ${pageNum}/${pdf.numPages}`, pageNum / Math.max(1, pdf.numPages));
+        }
+
+        return { links: Array.from(found) };
+      } catch (e) {
+        return { error: "Erro no processamento" };
+      }
+    }
+
+    function binarizeImage(imageData) {
+      const data = new Uint8ClampedArray(imageData.data);
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const val = avg < 150 ? 0 : 255;
+        data[i] = data[i+1] = data[i+2] = val;
+      }
+      return data;
+    }
+
+    function renderRow(name, linksOrMsg) {
+      const row = document.createElement('tr');
+
+      if (typeof linksOrMsg === "string") {
+        const msg = linksOrMsg;
+        const isError = msg === "Não encontrado" || msg.includes("Erro");
+        row.innerHTML = `
+          <td class="px-4 py-4 align-top text-sm font-semibold text-slate-100">${escapeHtml(name)}</td>
+          <td class="px-4 py-4 text-sm ${isError ? 'text-rose-200' : 'text-slate-300'}">
+            <span class="${isError ? 'inline-flex items-center gap-2 rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-200' : 'inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200'}">
+              ${isError ? '⚠️' : 'ℹ️'} ${escapeHtml(msg)}
+            </span>
+          </td>
+        `;
+        tableBody.appendChild(row);
+        return;
+      }
+
+      const links = linksOrMsg;
+
+      const itemsHtml = links.map((link) => {
+        const safeLink = escapeHtml(link);
+        return `
+          <div class="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/5 p-3">
+            <div class="flex items-start justify-between gap-3">
+              <a href="${safeLink}" target="_blank" class="min-w-0 break-all text-sm font-semibold text-indigo-200 hover:underline">
+                ${safeLink}
+              </a>
+              <button type="button"
+                class="shrink-0 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-slate-100 hover:bg-white/15 active:scale-[.99] transition"
+                data-copy="${safeLink}"
+                title="Copiar link">
+                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M8 2a2 2 0 00-2 2v9a2 2 0 002 2h7a2 2 0 002-2V7.414A2 2 0 0016.414 6L12 1.586A2 2 0 0010.586 1H8zm4 1.414L16.586 8H12V3.414z"/>
+                  <path d="M4 6a2 2 0 012-2h1a1 1 0 010 2H6v10h8v-1a1 1 0 112 0v1a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/>
+                </svg>
+                Copiar
+              </button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      row.innerHTML = `
+        <td class="px-4 py-4 align-top text-sm font-semibold text-slate-100">${escapeHtml(name)}</td>
+        <td class="px-4 py-4">
+          <div class="flex flex-col gap-2">${itemsHtml}</div>
+        </td>
+      `;
+      tableBody.appendChild(row);
+
+      row.querySelectorAll('button[data-copy]').forEach(btn => {
+        btn.addEventListener('click', () => copyToClipboard(btn.dataset.copy));
+      });
+    }
+
+    function exportExcel() {
+      if (!finalData.length) return;
+      const ws = XLSX.utils.json_to_sheet(finalData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Resultados");
+      XLSX.writeFile(wb, "Extracao_QRCode.xlsx");
+      toast("Excel gerado.", "ok");
+    }
+
+    btnExcel.addEventListener("click", exportExcel);
+    btnExcelTop.addEventListener("click", exportExcel);
+
+    btnCopyAll.addEventListener("click", async () => {
+      if (!allLinks.length) return;
+      const text = allLinks.join("\n");
+      await copyToClipboard(text);
+      toast(`Copiados ${allLinks.length} link(s).`, "ok");
+    });
+
+    // Init
+    resetAll();
+    onFilesChanged();
+  </script>
+
+  <!-- Window controls (Electron) -->
+  <script>
+    document.getElementById('minBtn')?.addEventListener('click', () => window.api?.minimize());
+    document.getElementById('maxBtn')?.addEventListener('click', () => window.api?.maximize());
+    document.getElementById('closeBtn')?.addEventListener('click', () => window.api?.close());
+  </script>
+</body>
+</html>
