@@ -21,3 +21,7 @@ Ferramenta web de alta performance projetada para extrair links de QR Codes em d
 * **jsQR**: Motor de decodificação de QR Codes em alta velocidade.
 * **SheetJS (XLSX)**: Geração de planilhas Excel sem necessidade de backend.
 * **Tailwind CSS**: Estilização moderna e interface intuitiva.
+
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Consulte o arquivo `LICENSE` para mais detalhes.
